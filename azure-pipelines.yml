@@ -1,0 +1,67 @@
+trigger:
+  branches:
+    include:
+      - development   # Run pipeline only on development branch
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  # Secrets injected from Key Vault via AzureKeyVault@2
+  azure-client-id: $(azure-client-id)
+  azure-client-secret: $(azure-client-secret)
+  azure-subscription-id: $(azure-subscription-id)
+  azure-tenant-id: $(azure-tenant-id)
+  acr-name: acrprojectleaningwpm
+  acr-repo: MYMSProjWPM
+
+steps:
+# 1. Pull secrets from Key Vault
+- task: AzureKeyVault@2
+  inputs:
+    azureSubscription: 'AzureSPConnection'   # Service connection name you created
+    KeyVaultName: 'projectlngwpmkeyvalut'    # Your Key Vault name
+    SecretsFilter: '*'                       # Pull all secrets
+
+# 2. Log in to Azure
+- task: AzureCLI@2
+  inputs:
+    azureSubscription: 'AzureSPConnection'
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      echo "Logging into Azure with Service Principal..."
+      az login --service-principal \
+        -u $(azure-client-id) \
+        -p $(azure-client-secret) \
+        --tenant $(azure-tenant-id)
+      az account set --subscription $(azure-subscription-id)
+
+# 3. Log in to ACR
+- task: AzureCLI@2
+  inputs:
+    azureSubscription: 'AzureSPConnection'
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      echo "Logging into ACR..."
+      az acr login --name acrprojectleaningwpm
+
+# 4. Build Docker image
+- task: Docker@2
+  displayName: Build Docker image
+  inputs:
+    command: build
+    dockerfile: '**/Dockerfile'
+    repository: acrprojectleaningwpm.azurecr.io/$(acr-repo)
+    tags: |
+      $(Build.BuildId)
+
+# 5. Push Docker image to ACR
+- task: Docker@2
+  displayName: Push Docker image
+  inputs:
+    command: push
+    repository: acrprojectleaningwpm.azurecr.io/$(acr-repo)
+    tags: |
+      $(Build.BuildId)
